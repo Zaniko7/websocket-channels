@@ -1,6 +1,6 @@
-import json
+# import json
 
-from channels.generic.websocket import WebsocketConsumer
+# from channels.generic.websocket import WebsocketConsumer
 # from channels.consumer import SyncConsumer
 
 # class EchoConsumer(SyncConsumer):
@@ -47,10 +47,12 @@ from channels.generic.websocket import WebsocketConsumer
 #         # Send message to WebSocket
 #         await self.send(text_data=json.dumps({"message": message}))
 
-from channels.generic.websocket import WebsocketConsumer
+from channels.generic.websocket import WebsocketConsumer,AsyncWebsocketConsumer,JsonWebsocketConsumer,AsyncJsonWebsocketConsumer
 from channels.exceptions import StopConsumer
 from asgiref.sync import async_to_sync
 import json
+from channels.consumer import SyncConsumer, AsyncConsumer
+from channels.exceptions import StopConsumer
 
 class EchoConsumer(WebsocketConsumer):
     def connect(self):
@@ -66,31 +68,31 @@ class EchoConsumer(WebsocketConsumer):
         elif bytes_data:
             self.send(bytes_data=bytes_data)
 
-class ChatConsumer(WebsocketConsumer):
-    def connect(self):
+class ChatConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
         self.user_id = self.scope['url_route']['kwargs']['username']
         self.group_name = f"chat_{self.user_id}"
 
-        async_to_sync(self.channel_layer.group_add)(
+        await self.channel_layer.group_add(
             self.group_name,
             self.channel_name
         )
 
-        self.accept()
+        await self.accept()
     
-    def disconnect(self, close_code):
-        async_to_sync(self.channel_layer.group_discard)(
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(
             self.group_name,
             self.channel_name
         )
 
-    def receive(self, text_data=None, bytes_data=None):
+    async def receive(self, text_data=None, bytes_data=None):
         if text_data:
             text_data_json = json.loads(text_data)
             username = text_data_json['receiver']
             user_group_name = f"chat_{username}"
             
-            async_to_sync(self.channel_layer.group_send)(
+            await self.channel_layer.group_send(
                 user_group_name,
                 {
                     'type': 'chat_message',
@@ -98,7 +100,69 @@ class ChatConsumer(WebsocketConsumer):
                 }
             )
 
-    def chat_message(self, event):
+    async def chat_message(self, event):
         message = event['message']
 
-        self.send(text_data=message)
+        await self.send(text_data=message)
+
+
+class ChatConsumer2(AsyncConsumer):
+    async def websocket_connect(self, event):
+        self.user_id = self.scope['url_route']['kwargs']['username']
+        self.group_name = f"chat_{self.user_id}"
+
+        await self.channel_layer.group_add(
+            self.group_name,
+            self.channel_name
+        )
+
+
+
+        await self.send({
+            "type": "websocket.accept"
+        })
+
+
+    async def websocket_disconnect(self, event):
+        await self.channel_layer.group_discard(
+            self.group_name,
+            self.channel_name
+        )
+        raise StopConsumer()
+
+    async def websocket_receive(self, event):
+        text_data = event.get('text', None)
+        if text_data:
+            text_data_json = json.loads(text_data)
+            username = text_data_json['receiver']
+            user_group_name = f"chat_{username}"
+            
+            await self.channel_layer.group_send(
+                user_group_name,
+                {
+                    'type': 'chat_message',
+                    'message': text_data
+                }
+            )
+
+    async def chat_message(self, event):
+        message = event['message']
+
+        await self.send({
+            "type": "websocket.send",
+            "text": message
+        })
+
+class TestConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+    
+    async def disconnect(self, close_code):
+        pass
+
+    async def receive_json(self, content, **kwargs):
+        message = content.get('message', '')
+        await self.send_json({
+            'message': message + " - Sent By Server"
+        })
+
